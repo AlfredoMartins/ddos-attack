@@ -1,4 +1,10 @@
 #include <iostream>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#include <cstring>
+#include <thread>
 #include <vector>
 #include <ctime>
 #include <sstream>
@@ -7,13 +13,8 @@
 #include <mutex>
 #include <fstream>
 #include <map>
-#include <set>
-#include <boost/asio.hpp>
-#include <thread>
 
 #define PORT 5000
-
-using boost::asio::ip::tcp;
 
 std::map<std::string, int> COMMAND_MAP = {
     {"ADD", 0},
@@ -91,12 +92,15 @@ struct ChronoLink {
 
 class Master {
 private:
-    boost::asio::io_context io_context;
-    tcp::acceptor acceptor;
-    std::vector<std::shared_ptr<tcp::socket>> clients;
+    int server_fd;
+    struct sockaddr_in address;
+    int opt = 1;
+    int addrlen = sizeof(address);
+    std::vector<std::thread> threads;
+    std::vector<int> clients;
+    std::vector<ChronoLink> links;
     std::mutex clients_mutex;
     bool running;
-    std::vector<ChronoLink> links;
 
     void trim(std::string &s) {
         s.erase(std::remove_if(s.begin(), s.end(), ::isspace), s.end());
@@ -166,7 +170,7 @@ private:
 
     int read_int_from_file(std::ifstream& file, int default_value) {
         std::string int_str;
-        std::getline(file, int_str, '|');
+        std::getline(file, int_str, '|');  // Read until '|'
 
         try {
             return int_str.empty() ? default_value : std::stoi(int_str);
@@ -176,109 +180,84 @@ private:
     }
 
 public:
-    Master() : acceptor(io_context, tcp::endpoint(tcp::v4(), PORT)), running(true) {}
+    Master() : running(true) {}
 
     void socket_setup() {
+        server_fd = socket(AF_INET, SOCK_STREAM, 0);
+        if (server_fd == -1) {
+            perror("socket failed");
+            exit(EXIT_FAILURE);
+        }
+
+        if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
+            perror("setsockopt failed");
+            exit(EXIT_FAILURE);
+        }
+
+        address.sin_family = AF_INET;
+        address.sin_addr.s_addr = INADDR_ANY;
+        address.sin_port = htons(PORT);
+
+        if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
+            perror("bind failed");
+            exit(EXIT_FAILURE);
+        }
+
+        if (listen(server_fd, 10) < 0) {
+            perror("listen failed");
+            exit(EXIT_FAILURE);
+        }
+
         std::cout << "Server listening on port " << PORT << std::endl;
-        start_listening_for_input();
-        accept_connections();
-        io_context.run();
-    }
+        show_navigation_menu();
 
-    void accept_connections() {
-        auto socket = std::make_shared<tcp::socket>(io_context);
-        acceptor.async_accept(*socket, [this, socket](boost::system::error_code ec) {
-            if (!ec) {
-                std::cout << "New client connected\n";
-                std::lock_guard<std::mutex> lock(clients_mutex);
-                clients.push_back(socket);
-                start_reading(socket);
+        while (running) {
+            int new_socket = accept(server_fd, (struct sockaddr *)&address, (socklen_t *)&addrlen);
+            if (new_socket < 0) {
+                perror("accept failed");
+                continue;
             }
-            accept_connections();
-        });
-    }
+            std::cout << "New client connected\n";
 
-    void start_reading(std::shared_ptr<tcp::socket> socket) {
-        auto buffer = std::make_shared<std::vector<char>>(1024);
-        socket->async_read_some(boost::asio::buffer(*buffer),
-            [this, socket, buffer](boost::system::error_code ec, std::size_t length) {
-                if (!ec) {
-                    std::string message(buffer->begin(), buffer->begin() + length);
-                    std::cout << "Received from client: " << message << std::endl;
-                    start_reading(socket);
-                } else {
-                    remove_client(socket);
-                }
-            });
-    }
+            // Locking the mutex for thread safety
+            std::lock_guard<std::mutex> lock(clients_mutex);
+            clients.push_back(new_socket);
 
-    void broadcast(const std::string &message) {
-        std::lock_guard<std::mutex> lock(clients_mutex);
-        for (auto it = clients.begin(); it != clients.end();) {
-            if ((*it)->is_open()) {
-                boost::asio::async_write(**it, boost::asio::buffer(message),
-                    [](boost::system::error_code ec, std::size_t) {});
-                ++it;
-            } else {
-                it = clients.erase(it);
-            }
+            threads.emplace_back([this, new_socket]() { handle_client(new_socket); });
         }
     }
 
-    void remove_client(std::shared_ptr<tcp::socket> socket) {
-        std::lock_guard<std::mutex> lock(clients_mutex);
-        clients.erase(std::remove(clients.begin(), clients.end(), socket), clients.end());
-        std::cout << "Client disconnected.\n";
-    }
+    void handle_client() {
+        while (true) {
+            std::cout << "Enter the command: " << std::endl;
+            std::string command = read_string_from_user();
+            if (command.empty()) break;
 
-    void start_listening_for_input() {
-        std::thread([this]() {
-            show_navigation_menu();
-            std::string command;
-
-            while (true) {
-                std::cout << "Enter the command: " << std::endl;
-                
-                if (!std::getline(std::cin, command) || command.empty()) 
+            switch (upper(command[0])) {
+                case 'A':
+                    handle_add_command();
                     break;
-                
-                switch (std::toupper(command[0])) {
-                    case 'A':
-                        handle_add_command();
-                        break;
-                    case 'E':
-                        handle_exec_command();
-                        break;
-                    case 'S':
-                        handle_shutdown_command();
-                        return;
-                    case 'T':
-                        handle_terminate_command();
-                        break;
-                    case 'C':
-                        handle_list_command();
-                        break;
-                    default:
-                        send_invalid_command_response();
-                        break;
-                }
+                case 'E':
+                    handle_exec_command();
+                    break;
+                case 'S':
+                    handle_shutdown_command();
+                    return;
+                case 'T':
+                    handle_terminate_command();
+                    return;
+                case 'C':
+                    handle_list_command();
+                    break;
+                default:
+                    send_invalid_command_response();
+                    break;
             }
+        }
 
-        }).detach();
     }
 
-    void show_navigation_menu() {
-        std::string msg = "COMMANDS:\n"
-                          "\tA - Add entry (ADD)\n"
-                          "\tE - Execute (EXEC)\n"
-                          "\tS - Stop server (STOP)\n"
-                          "\tT - Terminate session (TERMINATE)\n"
-                          "\tC - Connected clients (CONNECT)\n"
-                          "\tX - Exit (EXIT)";
-        std::cout << msg << std::endl << std::flush;
-    }
-
-    void handle_add_command() {
+    void handle_add_command(int client_socket) {
         std::ifstream file("file.txt");
 
         if (!file) {
@@ -310,62 +289,85 @@ public:
         links.push_back(link);
         std::string COMMAND = link.get_command();
         std::string message = "Added new entry: " + COMMAND;
-
-        broadcast(COMMAND);
+        send(client_socket, COMMAND.c_str(), COMMAND.size(), 0);
     }
 
-    void handle_exec_command() {
-        std::string msg = "EXEC|_|_|_|_";
-        broadcast(msg);
+    void handle_exec_command(int client_socket) {
+        std::string message = "EXEC|_|_|_|_";broadcast_message
     }
 
-    void handle_shutdown_command() {
+    void handle_shutdown_command(int client_socket) {
         std::cout << "Server shutting down." << std::endl;
         std::string msg = "SHUTDOWN|_|_|_|_";
-        broadcast(msg);
+        broadcast_message(msg);
         running = false;
-        io_context.stop();
+        close(server_fd);
+        exit(0);
     }
 
-    void handle_terminate_command() {
+    void handle_terminate_command(int client_socket) {
         std::string msg = "TERMINATE|_|_|_|_";
-        broadcast(msg);
-    
-        std::lock_guard<std::mutex> lock(clients_mutex);
-        for (auto& client : clients) {
-            if (client->is_open()) {
-                client->close();
-            }
-        }
-        clients.clear(); // Remove all disconnected clients from the list
-        std::cout << "All clients disconnected.\n";
+        broadcast_message(msg);
+        close(client_socket);
     }
-    
+
     void handle_list_command() {
         std::lock_guard<std::mutex> lock(clients_mutex);
-        std::string msg = "Connected clients: " + std::to_string(clients.size());
-        std::cout << msg << std::endl;
-        broadcast(msg);
+        int alive_clients = 0;
+        clients.erase(std::remove_if(clients.begin(), clients.end(),
+            [&](int client_socket) { return !is_client_alive(client_socket); }), clients.end());
+        alive_clients = clients.size();
+        std::cout << "Total clients: " << alive_clients << std::endl;
+    }
+
+    void show_navigation_menu() {
+        std::string msg = "COMMANDS:\n"
+                          "\tA - Add entry (ADD)\n"
+                          "\tE - Execute (EXEC)\n"
+                          "\tS - Stop server (STOP)\n"
+                          "\tT - Terminate session (TERMINATE)\n"
+                          "\tC - Connected clients (CONNECT)\n"
+                          "\tX - Exit (EXIT)";
+        std::cout << msg << std::endl << std::flush;
     }
 
     void send_invalid_command_response() {
-        std::string msg = "Invalid command.";
-        std::cout << msg << std::endl;
-        broadcast(msg);
+        std::string msg = "Invalid command. Please try again.";
+        broadcast_message(msg);
+    }
+
+    bool is_client_alive(int clientSocket) {
+        return send(clientSocket, "", 1, MSG_NOSIGNAL) != -1;
+    }
+
+    void broadcast_message(const std::string &message) {
+        std::lock_guard<std::mutex> lock(clients_mutex);
+        for (int i = 0; i < clients.size(); i++) {
+            int client_socket = clients.at(i);
+            if (is_client_alive(client_socket)) {
+                ssize_t sent = send(client_socket, message.c_str(), message.size(), 0);
+                if (sent == -1) {
+                    std::cerr << "Failed to send message to client. Closing socket." << std::endl;
+                    close(client_socket);
+                    clients.erase(std::remove(clients.begin(), clients.end(), client_socket), clients.end());
+                }
+            }
+        }
     }
 
     ~Master() {
-        for (auto& client : clients) {
-            if (client->is_open()) {
-                client->close();
+        for (auto &t : threads) {
+            if (t.joinable()) {
+                t.join();
             }
         }
+
+        close(server_fd);
     }
 };
 
 int main() {
     Master server;
     server.socket_setup();
-
     return 0;
 }

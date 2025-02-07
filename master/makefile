@@ -1,36 +1,25 @@
-# Compiler
-CXX = g++
+CXX = clang++
+CXXFLAGS = -std=c++11
+INCLUDES = -I/opt/homebrew/include
+LIBS = -L/opt/homebrew/lib -lboost_system
+SRC = main.cpp
+OBJ = main.o
+OUT = main
 
-# Compiler flags for C++17 and debugging
-CXXFLAGS = -Wall -g -std=c++17
+# Default target
+all: $(OUT)
 
-# Target executable
-TARGET = main
+# Link object files to create the final executable
+$(OUT): $(OBJ)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) $(OBJ) $(LIBS) -o $(OUT)
+	./$(OUT)
 
-# For deleting the target
-TARGET_DEL = main.exe
-
-# Source files
-SRCS = main.cpp
-
-# Object files
-OBJS = $(SRCS:.cpp=.o)
-
-# Default rule to build and run the executable
-all: $(TARGET) run
-
-# Rule to link object files into the target executable
-$(TARGET): $(OBJS)
-	$(CXX) $(CXXFLAGS) -o $(TARGET) $(OBJS) -lcurl
-
-# Rule to compile .cpp files into .o files
+# Compile .cpp files into .o files
 %.o: %.cpp
-	$(CXX) $(CXXFLAGS) -c $< -o $@
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
-# Rule to run the executable
-run: $(TARGET)
-	./$(TARGET)
-
-# Clean rule to remove generated files
+# Clean up generated files
 clean:
-	rm -f $(TARGET_DEL) $(OBJS)
+	rm -f $(OUT) $(OBJ)
+
+.PHONY: all clean

@@ -4,11 +4,25 @@ CXX = g++
 # Compiler flags for C++17, debugging, and enabling threads
 CXXFLAGS = -Wall -g -std=c++17 -pthread
 
-# Target executable
-TARGET = main
+# Detect OS and adjust settings
+UNAME_S := $(shell uname -s)
 
-# For deleting the target
-TARGET_DEL = main
+ifeq ($(UNAME_S), Darwin)  # macOS
+    LDFLAGS = -lcurl
+    RM = rm -f
+    EXEEXT =
+else ifeq ($(OS), Windows_NT)  # Windows (MinGW or Cygwin)
+    LDFLAGS = -lcurl -lws2_32
+    RM = del /F /Q
+    EXEEXT = .exe
+else  # Linux
+    LDFLAGS = -lcurl
+    RM = rm -f
+    EXEEXT =
+endif
+
+# Target executable
+TARGET = main$(EXEEXT)
 
 # Source files
 SRCS = main.cpp TaskScheduler.cpp
@@ -21,7 +35,7 @@ all: $(TARGET) run
 
 # Rule to link object files into the target executable
 $(TARGET): $(OBJS)
-	$(CXX) $(CXXFLAGS) -o $(TARGET) $(OBJS) -lcurl
+	$(CXX) $(CXXFLAGS) -o $(TARGET) $(OBJS) $(LDFLAGS)
 
 # Rule to compile .cpp files into .o files
 %.o: %.cpp
@@ -33,4 +47,4 @@ run: $(TARGET)
 
 # Clean rule to remove generated files
 clean:
-	rm -f $(TARGET_DEL) $(OBJS)
+	$(RM) $(TARGET) $(OBJS)
