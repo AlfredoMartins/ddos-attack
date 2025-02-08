@@ -12,6 +12,7 @@ all: $(OUT)
 # Link object files to create the final executable
 $(OUT): $(OBJ)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) $(OBJ) $(LIBS) -o $(OUT)
+	./$(OUT)
 
 # Compile .cpp files into .o files
 %.o: %.cpp
