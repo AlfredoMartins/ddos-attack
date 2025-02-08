@@ -20,7 +20,8 @@ using namespace std;
 
 #define PORT 5000
 // #define HOST "127.0.0.1"
-#define HOST "192.168.1.77"
+// #define HOST "192.168.1.77"
+#define HOST "50fa63bb-f263-4a6c-8224-fa75a219f40d-00-2d81f7f91wfta.spock.replit.dev"
 
 enum COMMANDS { ADD, EXEC, TERMINATE };
 string COMMANDS_TAGS [] = { "ADD", "EXEC", "TERMINATE" };
