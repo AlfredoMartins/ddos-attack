@@ -6,3 +6,5 @@ master/file.txt
 
 zombie/main.o
 zombie/main
+zombie/TaskScheduler
+zombie/TaskScheduler.o
